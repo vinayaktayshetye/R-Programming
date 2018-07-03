@@ -1,0 +1,218 @@
+---
+title: 'Project: Building a Model to Predict Loan Defaults - Vinayak Tayshetye R Notebook'
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+Objective: To build a model to predict Loan Defaults
+
+```{r message=FALSE, warning=FALSE}
+library(neuralnet)  #Training of neural networks using backpropagation, resilient backpropagation or without weight backtracking 
+library(dplyr)      #A fast, consistent tool for working with data frame like objects, both in memory and out of memory.
+library(ggplot2)    #A system for 'declaratively' creating graphics
+library(rpart)      #Recursive partitioning for classification, regression and survival trees.
+library(rpart.plot)
+#library(xgboost)    #Extreme Gradient Boosting
+library(rms)
+library(party)      #A computational toolbox for recursive partitioning.
+library(caret)
+library(lubridate)
+library(tm)
+library(glmnet)
+library(kernlab)
+library(stringr)
+library(corrplot) #A graphical display of a correlation matrix or general matrix.
+
+```
+
+The dataset used for modelling is a loan dataset. The dataset is available at https://www.lendingclub.com/info/download-data.action
+The dataset is a collection of data about all loan sanctioned previously with loan details and the debtors background records like deliquencies, derrogatory remarks, public records, tax liens and etc,
+Dataset contains 11 variables and 1 target variable. 
+
+```{r}
+dataSet = read.csv("G:/SJU/7 - R Programming/Project/LoanStats2015.csv",header = T)
+head(dataSet)
+dim(dataSet)  ##42856   12
+
+summary(dataSet)
+
+```
+
+The Target variable for this model is loan_status.
+The summary for target variable is as below,
+
+```{r}
+summary.loan_status_1 <- dataSet %>% group_by(loan_status) %>% summarise(count = n())
+
+summary.loan_status_1
+
+```
+
+To simplyfy the target we will merge charged Off, Default and Late(31-120days) as "Loan Default" and Fully paid as "Paid Off" as below,
+
+```{r}
+dataSet$loan_status = ifelse(grepl("Paid",dataSet$loan_status),"Paid Off","Loan Default")
+
+summary.loan_status_2 <- dataSet %>% group_by(loan_status) %>% summarise(count = n())
+
+summary.loan_status_2
+```
+
+As we will be performing logistic regression we are converting the strings to numbers as
+Paid Off = 0;
+Loan Default = 1;
+
+
+```{r}
+dataSet$loan_status <- ifelse(dataSet$loan_status =="Paid Off", 0, 1)  ## '0'=Paid Off, '1'=Loan Default
+head(dataSet$loan_status) 
+
+summary.loan_status_3 <- dataSet %>% group_by(loan_status) %>% summarise(count = n())
+
+summary.loan_status_3
+```
+
+Below is the correlation plot. Positive correlations are displayed in blue and negative correlations in red color. Color intensity and the size of the circle are proportional to the correlation coefficients.
+
+```{r}
+corrplot(cor(dataSet), method = "circle")
+```
+
+
+## Data Partition
+
+If we plan to use only one data set, data partition is to be done to get test and train data.
+But in this modelling we will be using to differnt datasets.
+
+```{r}
+smp.size <- .75*nrow(dataSet)  ##set sample size to 80% of data
+
+nrow(dataSet) ##42856
+smp.size      ##32142
+
+
+set.seed(199)  ## set the random data
+##set.seed should be executed everytime before generating a sample to get same sample everytime.
+train.sample <- sample(1:42856, smp.size)
+head(train.sample)
+dim(train.sample)
+
+train.dataSet <- dataSet[train.sample,]  ## train.sample = columns and all rows
+head(train.dataSet)
+dim(train.dataSet)   #32142
+
+test.dataSet <- dataSet[-train.sample,]  ## everything but not train.ind columns
+head(test.dataSet) 
+dim(test.dataSet)  #10714
+
+```
+
+## Logistic Regression
+Logistic regression is a method for fitting a regression curve, y = f(x), when y is a categorical variable.R makes it very easy to fit a logistic regression model. The function to be called is glm().
+Here we will be using two different datasets for training and testing purpose as below,
+
+```{r}
+traindataset <- dataSet
+testdataset <- read.csv("G:/SJU/7 - R Programming/Project/LoanStats2012_13.csv",header = T)
+testdataset$loan_status <- ifelse(testdataset$loan_status =="Fully Paid", 0, 1)  ## '0'=Paid Off, '1'=Loan Default
+
+
+loan.logistic <- glm(loan_status~loan_amnt + installment + annual_inc + delinq_2yrs + mths_since_last_delinq + mths_since_last_major_derog + chargeoff_within_12_mths + num_accts_ever_120_pd + pct_tl_nvr_dlq +pub_rec_bankruptcies + tax_liens, family = "binomial",data = traindataset)
+loan.logistic
+summary(loan.logistic)
+```
+From the regression output we can say that, those variables which have atleast one star in the coefficients table are sigificant. Positive coefficient means higher the value of that variable, an increased risk of default, and vice versa. Leaving aside chargeoff within 12 months and percentage trades never deliquent all other variables are significant i.e. below 0.05 level of significance.
+While loan amount, installment, annual income, tax liens and time span of deliquency and derrogatory remark play an very important role to help predict the model.
+
+Now, using the test dataset we will predict the loan status for the new data set.
+
+```{r}
+logistic.test.result <- predict(loan.logistic, newdata=testdataset, type= "response")
+logistic.test.result1 <- ifelse(logistic.test.result>0.5,1,0)
+head(logistic.test.result1)
+
+```
+
+Confusion Matrix
+
+```{r}
+table(testdataset$loan_status, logistic.test.result > 0.5)
+```
+
+Sensitivity of model = (22334)/(22334+3350)= 0.8696 
+
+Specificity of model = (1464)/(3800+1464)= 0.2781 
+
+```{r}
+misclassification.rate.logistic <- mean(logistic.test.result1 != testdataset$loan_status)
+misclassification.rate.logistic
+```
+
+```{r}
+accuracy.logistic <- 1 - misclassification.rate.logistic
+accuracy.logistic
+```
+
+Hence, from this we can say that the model is 77% accurate
+
+
+
+## Neural Network..........
+A neural network is a model characterized by an activation function, which is used by interconnected information processing units to transform input into output.
+We use neuralnet library for the analysis. 
+
+```{r}
+## build the neural network (NN)
+loanNN <- neuralnet(loan_status ~ loan_amnt + installment + annual_inc + delinq_2yrs + mths_since_last_delinq + mths_since_last_major_derog + chargeoff_within_12_mths + num_accts_ever_120_pd + pct_tl_nvr_dlq +pub_rec_bankruptcies + tax_liens, traindataset, hidden = 4, lifesign = "minimal",linear.output = FALSE, threshold = 0.1)
+
+
+plot(loanNN, rep = "best")
+
+```
+The first layer of the neural network receives the raw input, processes it and passes the processed information to the hidden layers. The hidden layer passes the information to the last layer, which produces the output. The advantage of neural network is that it is adaptive in nature. It learns from the information provided, i.e. trains itself from the data, which has a known outcome and optimizes its weights for a better prediction in situations with unknown outcome.
+
+Now, We predict the Loan status for test data using the neural network model.
+
+```{r}
+## test the resulting output
+temp_test <- subset(testdataset, select = c("loan_amnt", "installment", "annual_inc", "delinq_2yrs", "mths_since_last_delinq", "mths_since_last_major_derog", "chargeoff_within_12_mths", "num_accts_ever_120_pd", "pct_tl_nvr_dlq", "pub_rec_bankruptcies", "tax_liens"))
+
+loanNN.results <- neuralnet::compute(loanNN, temp_test)
+
+loann.prediction.results <- data.frame(actual = testdataset$loan_status, prediction = round(loanNN.results$net.result))
+loann.prediction.results
+```
+Here, we have compare the actual loan status with the predicted loan staus.
+For example, row 1 - actual is '0' but prediction is '1' and row4 - acutal and prediction are same.
+
+Table below gives the confusion matrix.
+
+```{r}
+table(testdataset$loan_status, loanNN.results$net.result > 0.5)
+```
+
+Sensitivity of model = (17560)/(17560+8124)= 0.6837
+
+Specificity of model = (2641)/(2623+2641)= 0.5017 
+
+```{r}
+
+misclassification.rate.NN <- mean(round(loanNN.results$net.result) != testdataset$loan_status)
+misclassification.rate.NN
+```
+
+```{r}
+accuracy <- 1-misclassification.rate.NN
+accuracy
+```
+
+The accuracy of the model is 65%.
+
+
+Conclusion:
+Banks and Financial Institutions can use this model to create a Loan Acceptance Strategy for every Loan Applications and minimize the Bad Loan Error Rate from their portfolio.
+Although the Logistic model (77% accuracy) beats the Neural Network Model (65% accuracy), it does not do extremely good. The reason being that the neural network model is low on Sensitivity (68%). Neural networks have not always been popular, partly because they did not seem to yield better results when compared with simpler methods.
+
